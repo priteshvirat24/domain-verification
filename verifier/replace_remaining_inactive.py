@@ -149,8 +149,12 @@ def save_master_files(all_rows: list[dict], excel_path: Path, csv_path: Path):
         if st in ("VERIFIED_ACTIVE", "REPLACED_INACTIVE", "PRE_EXISTING_ACTIVE"):
             total_active += 1
 
-    wb.save(excel_path)
-    wb.save("SUPER_MERGED_MASTER_FINAL_POPULATED.xlsx")
+    temp_excel = excel_path.with_name(f"{excel_path.stem}.tmp.xlsx")
+    wb.save(temp_excel)
+    temp_excel.replace(excel_path)
+    temp_excel_pop = Path("SUPER_MERGED_MASTER_FINAL_POPULATED.tmp.xlsx")
+    wb.save(temp_excel_pop)
+    temp_excel_pop.replace("SUPER_MERGED_MASTER_FINAL_POPULATED.xlsx")
 
     total_rows = len(all_rows)
     coverage = round((total_active / total_rows) * 100, 2)
