@@ -1,0 +1,53 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Caches and virtual environments
+.venv/
+venv/
+ENV/
+env/
+.uv-cache/
+.pytest_cache/
+.ruff_cache/
+
+# SQLite databases & journals
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+
+# Logs and runtime artifacts
+*.log
+recovery.log
+
+# Large data files and outputs
+*.zip
+*.xlsx
+*.jsonl
+run_*_output/
+test_*_output/
+apify_test_output/
+dry_run_output/
+recovery_output/
+pilot_recovery_output/
+
+# CSV files (exclude large datasets, keep sample fixtures for unit tests)
+*.csv
+!verifier/sample_enriched.csv
+!verifier/sample_review.csv
+
+# Scrapling local build / cache (if tracked)
+Scrapling/.venv/
+Scrapling/.pytest_cache/
+Scrapling/build/
+Scrapling/dist/
+Scrapling/*.egg-info/
+Scrapling/__pycache__/
+
+# OS & IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -1,0 +1,23 @@
+{
+  "title": "Domain to Company Verification",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "input_file": {"title": "CSV or XLSX input URL/path", "type": "string", "description": "HTTPS URL of a CSV/XLSX file or a path in the Actor container", "editor": "textfield"},
+    "organization_column": {"title": "Organization column override", "type": "string", "editor": "textfield"},
+    "domain_column": {"title": "Domain column override", "type": "string", "editor": "textfield"},
+    "dry_run": {"title": "Dry run only", "type": "boolean", "default": true},
+    "sample_size": {"title": "Dry-run rows", "type": "integer", "default": 75, "minimum": 50, "maximum": 100},
+    "concurrency": {"title": "Concurrent domains", "type": "integer", "default": 20, "minimum": 1, "maximum": 100},
+    "max_evidence_pages": {"title": "Evidence pages per host", "type": "integer", "default": 7, "minimum": 0, "maximum": 10},
+    "per_host_delay_seconds": {"title": "Per-host delay in seconds", "type": "number", "default": 1, "minimum": 0},
+    "timeout_seconds": {"title": "Per-request timeout in seconds", "type": "integer", "default": 18, "minimum": 5, "maximum": 60},
+    "use_dynamic": {"title": "Enable JS fallback", "type": "boolean", "default": false},
+    "use_stealth": {"title": "Enable protected-site fallback", "type": "boolean", "default": false},
+    "use_proxy": {"title": "Use Apify Proxy", "type": "boolean", "default": false},
+    "search_ambiguous": {"title": "Search ambiguous cases with Tavily API key", "type": "boolean", "default": false},
+    "max_external_searches": {"title": "Maximum external searches", "type": "integer", "default": 1000, "minimum": 0, "maximum": 100000},
+    "run_key": {"title": "Optional refresh key", "type": "string", "description": "Change this value to create fresh result datasets for a new verification run", "editor": "textfield"}
+  },
+  "required": ["input_file"]
+}

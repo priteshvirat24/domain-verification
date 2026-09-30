@@ -1,0 +1,12 @@
+{
+  "actorSpecification": 1,
+  "name": "domain-company-verifier",
+  "title": "Domain to Company Verifier",
+  "description": "Evidence-based organization and domain relationship verification using Scrapling",
+  "version": "0.1",
+  "buildTag": "latest",
+  "defaultMemoryMbytes": 2048,
+  "minMemoryMbytes": 1024,
+  "maxMemoryMbytes": 8192,
+  "input": "./input_schema.json"
+}

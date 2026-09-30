@@ -1,0 +1,16 @@
+Domains List_V2.xlsx
+.git/
+Scrapling/.git/
+Scrapling/.venv/
+Scrapling/.github/
+verifier/*.csv
+verifier/*.sqlite
+verifier/*.jsonl
+verifier/dry_run_output/
+verifier/__pycache__/
+verifier/.venv/
+verifier/.uv-cache/
+verifier/tests/
+Scrapling/tests/
+Scrapling/images/
+Scrapling/docs/

@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HLD Architecture - Enterprise Inactive Domain Recovery Pipeline</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #090d16;
+      --card-bg: rgba(15, 23, 42, 0.85);
+      --border: rgba(148, 163, 184, 0.15);
+      --accent: #38bdf8;
+      --accent-purple: #c084fc;
+      --accent-green: #34d399;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      padding: 32px 24px;
+    }
+    .container {
+      max-width: 1380px;
+      margin: 0 auto;
+    }
+    header {
+      margin-bottom: 32px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 24px;
+    }
+    .badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 9999px;
+      background: rgba(56, 189, 248, 0.15);
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin-bottom: 12px;
+      border: 1px solid rgba(56, 189, 248, 0.3);
+    }
+    h1 {
+      font-size: 32px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+      background: linear-gradient(135deg, #f8fafc 0%, #cbd5e1 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    p.lead {
+      color: var(--text-muted);
+      font-size: 16px;
+      max-width: 900px;
+    }
+    .tabs {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 24px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 12px;
+    }
+    .tab-btn {
+      background: rgba(30, 41, 59, 0.6);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      padding: 10px 20px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      transition: all 0.2s ease;
+    }
+    .tab-btn:hover {
+      background: rgba(51, 65, 85, 0.8);
+      color: var(--text);
+    }
+    .tab-btn.active {
+      background: var(--accent);
+      color: #090d16;
+      border-color: var(--accent);
+    }
+    .tab-content {
+      display: none;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 32px;
+      box-shadow: 0 20px 40px -15px rgba(0,0,0,0.5);
+      backdrop-filter: blur(12px);
+    }
+    .tab-content.active {
+      display: block;
+    }
+    .image-container {
+      width: 100%;
+      text-align: center;
+      background: #020617;
+      border-radius: 12px;
+      padding: 16px;
+      border: 1px solid rgba(148, 163, 184, 0.1);
+    }
+    .image-container img {
+      width: 100%;
+      max-width: 1280px;
+      height: auto;
+      border-radius: 8px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+    }
+    .mermaid {
+      display: flex;
+      justify-content: center;
+      background: transparent;
+      padding: 16px;
+      overflow-x: auto;
+    }
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+      margin-top: 24px;
+    }
+    .metric-card {
+      background: rgba(30, 41, 59, 0.5);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+    }
+    .metric-title {
+      font-size: 13px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+    }
+    .metric-val {
+      font-size: 26px;
+      font-weight: 800;
+      color: var(--accent);
+      margin-top: 6px;
+    }
+    .metric-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <span class="badge">Enterprise High-Level Design (HLD)</span>
+      <h1>Inactive Domain Discovery, Verification & Dataset Replacement Pipeline</h1>
+      <p class="lead">
+        Autonomous discovery of official web footprints for 30,420 inactive corporate records via 24 concurrent Apify search actors, multi-tier Scrapling TLS crawling, Elimination-First identity verification, and reconciliation into the 93,918-row master dataset.
+      </p>
+    </header>
+
+    <div class="tabs">
+      <button class="tab-btn active" onclick="showTab('visual')">🎨 High-Res Architecture Diagram</button>
+      <button class="tab-btn" onclick="showTab('flow')">📐 Interactive System Flow (HLD)</button>
+      <button class="tab-btn" onclick="showTab('sequence')">⏱️ Sequence Diagram</button>
+      <button class="tab-btn" onclick="showTab('state')">🔄 State Lifecycle Machine</button>
+    </div>
+
+    <!-- TAB 1: Visual Image -->
+    <div id="visual" class="tab-content active">
+      <div class="image-container">
+        <img src="hld_architecture_diagram.jpg" alt="HLD - Enterprise Inactive Domain Recovery and Verification Pipeline">
+      </div>
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-title">Master Dataset Scope</div>
+          <div class="metric-val">93,918</div>
+          <div class="metric-desc">Complete corporate entity records</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-title">Inactive Recovery Scope</div>
+          <div class="metric-val">30,420</div>
+          <div class="metric-desc">Inactive domains targeted for discovery</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-title">Apify Search Concurrency</div>
+          <div class="metric-val">24 Workers</div>
+          <div class="metric-desc">Parallel actors (50 queries/batch)</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-title">Scrapling Concurrency</div>
+          <div class="metric-val">150 Crawlers</div>
+          <div class="metric-desc">TLS/curl-impersonate fingerprinting</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 2: Interactive HLD Diagram -->
+    <div id="flow" class="tab-content">
+      <div class="mermaid">
+flowchart TB
+    subgraph Layer1 ["Layer 1: Ingestion, Partitioning & Deduplication"]
+        direction TB
+        M_IN["Master Results CSV<br>run_full_output/results.csv<br>(93,918 rows)"] --> FILT["Row Filter Engine<br>Predicate: classification == 'INACTIVE'"]
+        FILT --> INACT["Inactive Partition Pool<br>(30,420 rows)"]
+        INACT --> DEDUP["Corporate Entity Deduplicator<br>& Search Query Builder"]
+        DEDUP -->|"Clean Org + Country<br>q = '{org}' {country} official website"| U_QUERIES["Unique Query Map<br>(25,530 unique queries)<br>1 Query -> [Row_1, Row_2, ... Row_N]"]
+    end
+
+    subgraph Layer2 ["Layer 2: SERP Discovery & Cache Subsystem"]
+        direction TB
+        U_QUERIES --> C_CHK{"Search Cache Lookup<br>(search_cache.sqlite)<br>PRAGMA journal_mode=WAL"}
+        C_CHK -- "Cache Hit (O(1))" --> C_HIT["Cached SERP Items"]
+        C_CHK -- "Cache Miss" --> DISP["Batch Dispatcher<br>(50 queries / chunk)"]
+        
+        DISP --> POOL["24 Concurrent Actor Workers<br>(asyncio.Semaphore = 24)"]
+        POOL --> APIFY["Apify Cloud Platform<br>Actor: apify/google-search-scraper<br>Residential Proxies + SERP Engine"]
+        APIFY --> RES_WRITE["Atomic Cache Writer<br>INSERT OR REPLACE INTO searches"]
+        RES_WRITE --> C_HIT
+
+        C_HIT --> EXTRACT["Candidate Domain Extractor<br>Filters Social, Directories, PDFs<br>Extracts Root FQDN"]
+        EXTRACT --> CAND_MAP["Candidate Domain Mapping<br>Row ID -> Candidate Host"]
+    end
+
+    subgraph Layer3 ["Layer 3: Multi-Tier Content Crawling Subsystem"]
+        direction TB
+        CAND_MAP --> DOM_DEDUP["Domain Pool Deduplicator<br>(Unique Target Hosts)"]
+        DOM_DEDUP --> D_CACHE{"Domain Cache Lookup<br>(live_validation_4000_cache.sqlite)<br>40,415 Pre-cached Records"}
+        D_CACHE -- "Hit" --> DOM_REC["Cached DomainRecord"]
+        D_CACHE -- "Miss" --> CRAWL_SEM["Crawler Semaphore<br>(concurrency = 150)"]
+        
+        CRAWL_SEM --> DNS_P["DNS Resolver & SSRF Probe<br>Detects NXDOMAIN & Private IPs"]
+        DNS_P --> HTTP_FETCH["TieredFetcher Engine<br>Scrapling + curl-impersonate<br>Chrome/Safari TLS Fingerprinting"]
+        HTTP_FETCH --> EXT_DOM["Structured Evidence Extractor<br>Title, H1, Meta, JSON-LD, Footer Legal Names"]
+        EXT_DOM --> DOM_WRITE["Atomic Domain Cache Write<br>live_validation_4000_cache.sqlite"]
+        DOM_WRITE --> DOM_REC
+    end
+
+    subgraph Layer4 ["Layer 4: Elimination-First Verification Engine"]
+        direction TB
+        CAND_MAP --> MERGE["Row & Candidate Merger"]
+        DOM_REC --> MERGE
+        MERGE --> ENGINE["Elimination-First Arbiter<br>verifier/elimination_engine.py"]
+
+        subgraph Checks ["Deterministic Signal Verification Matrix"]
+            direction LR
+            CA["C_A: Search Rank"]
+            CB["C_B: Legal Name"]
+            CC["C_C: Brand Slug"]
+            CD["C_D: Country TLD"]
+            CE["C_E: Address"]
+            CF["C_F: Phone Code"]
+            CG["C_G: Email FQDN"]
+            CH["C_H: Industry"]
+            CI["C_I: Corporate Group"]
+        end
+
+        ENGINE --> Checks
+        Checks --> DECIDE{"Elimination Arbiter Decision"}
+        DECIDE -- "Brand/Legal Match Confirmed" --> RES_V["VALID (Confidence: HIGH)"]
+        DECIDE -- "Parent Umbrella Confirmed" --> RES_VG["VALID_GROUP (Confidence: HIGH)"]
+        DECIDE -- "Contradiction / Competing Entity" --> RES_M["MISMATCH (Retain INACTIVE)"]
+        DECIDE -- "Target Host Unreachable" --> RES_I["INACTIVE (Retain INACTIVE)"]
+        DECIDE -- "No SERP Result Found" --> RES_NF["NOT_FOUND (Retain INACTIVE)"]
+    end
+
+    subgraph Layer5 ["Layer 5: Reconciliation, Replacement & Output Generation"]
+        direction TB
+        RES_V & RES_VG --> RECOV_POOL["Recovered Pool<br>New Domain, Evidence & Confidence"]
+        RES_M & RES_I & RES_NF --> UNRECOV_POOL["Unrecovered Pool<br>Preserve Original Inactive State"]
+
+        RECOV_POOL & UNRECOV_POOL --> RECON["Master Dataset Reconciler<br>Match Key: input_row_id"]
+        M_IN --> RECON
+
+        RECON --> BKP["Immutable Safety Backup<br>run_full_output/results_backup_pre_recovery.csv"]
+        RECON --> OUT_REPL["Master Updated Dataset<br>recovery_output/results_full_active_replaced.csv"]
+        RECON --> OUT_LIVE["In-Place Live Master Update<br>run_full_output/results.csv"]
+        RECON --> OUT_AUDIT["Inactive Recovery Audit Log<br>recovery_output/full_inactive_recovered_results.csv"]
+        RECON --> OUT_SUM["Metrics & Health Summary<br>run_full_output/summary.json"]
+    end
+
+    Layer1 ==> Layer2
+    Layer2 ==> Layer3
+    Layer3 ==> Layer4
+    Layer4 ==> Layer5
+      </div>
+    </div>
+
+    <!-- TAB 3: Sequence Diagram -->
+    <div id="sequence" class="tab-content">
+      <div class="mermaid">
+sequenceDiagram
+    autonumber
+    actor CLI as Pipeline Runner (recover_inactive.py)
+    participant SC as Search Cache (SQLite WAL)
+    participant Apify as Apify Cloud (24 Actors)
+    participant DC as Domain Cache (SQLite WAL)
+    participant Fetcher as Scrapling Crawler (150 Workers)
+    participant Elim as Elimination Engine
+    participant Disk as File System Storage
+
+    Note over CLI,Disk: Step 1: Ingestion & Deduplication
+    CLI->>Disk: Read run_full_output/results.csv (93,918 rows)
+    Disk-->>CLI: Return all rows
+    CLI->>CLI: Filter 30,420 rows where classification == 'INACTIVE'
+    CLI->>CLI: Group rows by clean organization & country (25,530 unique queries)
+
+    Note over CLI,Apify: Step 2: SERP Discovery & Cache Check
+    CLI->>SC: Query cached searches for 25,530 queries
+    SC-->>CLI: Return cached results (~1,470+ hits)
+    CLI->>CLI: Chunk remaining misses into batches of 50
+    loop 24 Parallel Async Workers
+        CLI->>Apify: Call apify/google-search-scraper (50 queries)
+        Apify-->>CLI: Return organic SERP results
+        CLI->>SC: Store queries & SERP items (INSERT OR REPLACE)
+    end
+
+    Note over CLI,Fetcher: Step 3: Domain Extraction & Crawling
+    CLI->>CLI: Parse organic URLs -> Extract clean candidate FQDNs
+    CLI->>DC: Check cache for unique candidate domains
+    DC-->>CLI: Return cached DomainRecords
+    loop 150 Concurrent Scrapling Tasks
+        CLI->>Fetcher: Fetch target candidate host (TLS/HTTP impersonation)
+        Fetcher-->>CLI: Return DomainRecord (HTML, title, JSON-LD, footer)
+        CLI->>DC: Save DomainRecord to live_validation_4000_cache.sqlite
+    end
+
+    Note over CLI,Elim: Step 4: Verification Evaluation
+    loop For Every Inactive Row (30,420 rows)
+        CLI->>Elim: evaluate_elimination_decision(row, candidate_norm, dom_rec)
+        Elim->>Elim: Execute 9 Checks (C_A through C_I)
+        Elim-->>CLI: Return decision (VALID, VALID_GROUP, MISMATCH, or INACTIVE)
+    end
+
+    Note over CLI,Disk: Step 5: Dataset Reconciliation & Master Replacement
+    CLI->>Disk: Copy run_full_output/results.csv -> results_backup_pre_recovery.csv
+    CLI->>CLI: Reconcile 93,918 rows: replace recovered domains, preserve original_domain
+    CLI->>Disk: Write recovery_output/full_inactive_recovered_results.csv
+    CLI->>Disk: Write recovery_output/results_full_active_replaced.csv
+    CLI->>Disk: Overwrite run_full_output/results.csv
+    CLI->>Disk: Write run_full_output/summary.json & global_recovery_summary.json
+      </div>
+    </div>
+
+    <!-- TAB 4: State Machine -->
+    <div id="state" class="tab-content">
+      <div class="mermaid">
+stateDiagram-v2
+    [*] --> INACTIVE: Dataset Ingestion (30,420 rows)
+
+    INACTIVE --> CLEANING: Extract Clean Org & Country
+    CLEANING --> SERP_CACHE_CHECK: Generate Query
+
+    state SERP_CACHE_CHECK {
+        [*] --> CheckCache
+        CheckCache --> CacheHit: Found in SQLite
+        CheckCache --> CacheMiss: Missing
+        CacheMiss --> ApifyScrape: 24 Concurrent Workers (50/batch)
+        ApifyScrape --> StoreCache: Write to search_cache.sqlite
+        StoreCache --> ExtractCandidate
+        CacheHit --> ExtractCandidate
+    }
+
+    SERP_CACHE_CHECK --> NOT_FOUND: No Organic Results / Directory Only
+    NOT_FOUND --> RETAIN_INACTIVE: Log Audit Reason
+
+    SERP_CACHE_CHECK --> CRAWL_CANDIDATE: Candidate Domain Discovered
+
+    state CRAWL_CANDIDATE {
+        [*] --> CheckDomainCache
+        CheckDomainCache --> DomCacheHit: Found (40,415 pre-cached)
+        CheckDomainCache --> DomCacheMiss: Unseen Domain
+        DomCacheMiss --> ScraplingFetch: 150 Workers (curl-impersonate)
+        ScraplingFetch --> WriteDomainCache: Save to Cache DB
+        WriteDomainCache --> ExtractFacts
+        DomCacheHit --> ExtractFacts
+    }
+
+    CRAWL_CANDIDATE --> ELIMINATION_ENGINE: Extracted Facts & Metadata
+
+    state ELIMINATION_ENGINE {
+        [*] --> EvaluateSignals: Run Checks C_A through C_I
+        EvaluateSignals --> CheckContradictions
+        CheckContradictions --> ValidDecided: Brand & Entity Match
+        CheckContradictions --> GroupDecided: Umbrella / Holding Match
+        CheckContradictions --> MismatchDecided: Contradictory Proof
+        CheckContradictions --> DeadDecided: Host Unreachable
+    }
+
+    ValidDecided --> RECOVERED_VALID: Classification = VALID
+    GroupDecided --> RECOVERED_VALID_GROUP: Classification = VALID_GROUP
+    MismatchDecided --> RETAIN_INACTIVE: Recovery Status = UNVERIFIED_MISMATCH
+    DeadDecided --> RETAIN_INACTIVE: Recovery Status = UNVERIFIED_INACTIVE
+
+    RECOVERED_VALID --> RECONCILE: Update Domain Name & Confidence
+    RECOVERED_VALID_GROUP --> RECONCILE: Update Domain Name & Confidence
+    RETAIN_INACTIVE --> RECONCILE: Preserve Original Inactive Domain
+
+    state RECONCILE {
+        [*] --> BackupMaster: Backup to results_backup_pre_recovery.csv
+        BackupMaster --> OverwriteMaster: Write updated run_full_output/results.csv
+        OverwriteMaster --> WriteSummaries: Generate summary.json & audit CSV
+    }
+
+    RECONCILE --> [*]: Pipeline Complete
+      </div>
+    </div>
+  </div>
+
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'dark',
+      themeVariables: {
+        darkMode: true,
+        background: '#090d16',
+        primaryColor: '#1e293b',
+        primaryTextColor: '#f8fafc',
+        primaryBorderColor: '#38bdf8',
+        lineColor: '#64748b',
+        secondaryColor: '#0f172a',
+        tertiaryColor: '#1e293b'
+      }
+    });
+
+    function showTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      
+      event.target.classList.add('active');
+      const target = document.getElementById(tabId);
+      target.classList.add('active');
+      
+      // Re-trigger mermaid render if needed
+      mermaid.contentLoaded();
+    }
+  </script>
+</body>
+</html>

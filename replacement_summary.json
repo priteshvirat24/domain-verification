@@ -1,0 +1,10 @@
+{
+  "total_rows": 113488,
+  "clean_pre_existing_active": 60565,
+  "inactive_replaced_with_active": 9459,
+  "inactive_retained_unverified": 10057,
+  "newly_populated_empty_rows": 9021,
+  "still_empty_not_found": 24386,
+  "total_active_domains_now": 79045,
+  "active_domain_coverage_percent": 69.65
+}

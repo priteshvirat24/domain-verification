@@ -1,0 +1,14 @@
+{
+  "total_rows": 113488,
+  "total_recovered_inactive": 852,
+  "total_recovered_not_found": 4123,
+  "total_active_domains": 87908,
+  "active_domain_coverage_percent": 77.46,
+  "status_breakdown": {
+    "VERIFIED_ACTIVE": 13249,
+    "PRE_EXISTING_ACTIVE": 60565,
+    "REPLACED_INACTIVE": 14094,
+    "NOT_FOUND": 20158,
+    "UNVERIFIED_INACTIVE": 5422
+  }
+}

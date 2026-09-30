@@ -1,0 +1,4 @@
+-e ./Scrapling[fetchers]
+apify>=3,<5
+openpyxl>=3.1,<4
+tldextract>=5,<6
