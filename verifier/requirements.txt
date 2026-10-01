@@ -1,4 +1,11 @@
 -e ./Scrapling[fetchers]
-apify>=3,<5
+camoufox>=0.5.6
+browserforge>=1.2.0
+curl_cffi>=0.16.0
+dnspython>=2.8.0
+aiohttp>=3.10.0
+duckduckgo_search>=8.0.0
+playwright>=1.50.0
 openpyxl>=3.1,<4
 tldextract>=5,<6
+apify>=3,<5

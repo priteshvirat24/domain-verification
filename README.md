@@ -167,8 +167,11 @@ cd domain-verification
 python3 -m venv .venv
 source .venv/bin/activate
 
-# Install dependencies
+# Install all open-source dependencies (including local Scrapling)
 pip install -r verifier/requirements.txt
+
+# (One-time) Fetch Camoufox anti-detect browser binary for open-source crawling
+python -m camoufox fetch
 ```
 
 ### 3. Setting Up Credentials (Safe & Secure)
