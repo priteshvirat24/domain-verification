@@ -22,6 +22,14 @@ env/
 *.log
 recovery.log
 
+# Environment variables, credentials and secrets
+.env
+.env.*
+*.env
+*.token
+*secret*
+*credentials*
+
 # Large data files and outputs
 *.zip
 *.xlsx

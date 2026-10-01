@@ -1,6 +1,7 @@
 """Bounded crawler configuration."""
 from __future__ import annotations
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -18,7 +19,7 @@ class Config:
     respect_robots: bool = True
     max_body_bytes: int = 800_000
     use_apify: bool = True
-    apify_token: str | None = "YOUR_APIFY_API_TOKEN"
+    apify_token: str | None = os.environ.get("APIFY_TOKEN") or os.environ.get("APIFY_API_TOKEN")
 
     def validate(self) -> None:
         if self.concurrency < 1 or self.concurrency > 200:

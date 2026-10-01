@@ -61,7 +61,7 @@ async def main():
         use_stealth=False,
         use_proxy=False,
         use_apify=True,
-        apify_token="YOUR_APIFY_API_TOKEN",
+        apify_token=os.environ.get("APIFY_TOKEN") or os.environ.get("APIFY_API_TOKEN"),
     )
 
     cache = SQLiteCache(CACHE_PATH, config.cache_ttl_seconds)

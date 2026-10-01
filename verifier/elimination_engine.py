@@ -252,7 +252,9 @@ def evaluate_elimination_decision(
     clean_org = org_prof["clean_name"]
     core_org = org_prof["core_name"]
     org_tokens = org_prof["tokens"]
-    
+    terr_prof = clean_organization_name(sales_territory)
+    terr_tokens = terr_prof["tokens"]
+
     # Extract website facts
     facts = extract_website_observable_facts(domain)
     title = facts["website_title"]

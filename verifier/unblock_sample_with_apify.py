@@ -3,6 +3,7 @@ import asyncio
 import csv
 import json
 import logging
+import os
 import sqlite3
 import time
 from collections import Counter
@@ -17,7 +18,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 LOG = logging.getLogger("unblock_runner")
 
 CACHE_PATH = "verifier/live_validation_4000_cache.sqlite"
-APIFY_TOKEN = "YOUR_APIFY_API_TOKEN"
+APIFY_TOKEN = os.environ.get("APIFY_TOKEN") or os.environ.get("APIFY_API_TOKEN") or ""
 
 
 async def main():

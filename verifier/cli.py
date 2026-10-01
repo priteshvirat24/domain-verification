@@ -69,7 +69,7 @@ def main() -> None:
     parser.add_argument("--offline", action="store_true", help="inspect sample/output using cached evidence only")
     parser.add_argument("--use-apify", action="store_true", default=True, help="use Apify actors for unblocking and search")
     parser.add_argument("--no-apify", dest="use_apify", action="store_false", help="disable Apify actors")
-    parser.add_argument("--apify-token", default="YOUR_APIFY_API_TOKEN")
+    parser.add_argument("--apify-token", default=os.environ.get("APIFY_TOKEN") or os.environ.get("APIFY_API_TOKEN"), help="Apify API Token (can also be set via APIFY_TOKEN env var)")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     asyncio.run(_run(args))
