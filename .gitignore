@@ -46,13 +46,21 @@ pilot_recovery_output/
 !verifier/sample_enriched.csv
 !verifier/sample_review.csv
 
-# Scrapling local build / cache (if tracked)
+# Open-source libraries local build / cache (if tracked)
 Scrapling/.venv/
 Scrapling/.pytest_cache/
 Scrapling/build/
 Scrapling/dist/
 Scrapling/*.egg-info/
 Scrapling/__pycache__/
+camoufox/build/
+camoufox/dist/
+camoufox/*.egg-info/
+camoufox/.venv/
+browserforge/build/
+browserforge/dist/
+browserforge/*.egg-info/
+browserforge/.venv/
 
 # OS & IDE
 .DS_Store
