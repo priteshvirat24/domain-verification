@@ -116,8 +116,9 @@ def save_csv_checkpoint(all_rows: list[dict], csv_path: Path):
         writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(all_rows)
-    temp_csv.replace(csv_path)
-    LOG.info("Checkpoint saved to CSV (%s).", csv_path)
+    safe_csv = csv_path.with_name(csv_path.stem + "_REMAINING_REVIEWED.csv")
+    temp_csv.replace(safe_csv)
+    LOG.info("Checkpoint saved to CSV (%s).", safe_csv)
 
 
 def save_master_files(all_rows: list[dict], excel_path: Path, csv_path: Path):
@@ -151,10 +152,7 @@ def save_master_files(all_rows: list[dict], excel_path: Path, csv_path: Path):
 
     temp_excel = excel_path.with_name(f"{excel_path.stem}.tmp.xlsx")
     wb.save(temp_excel)
-    temp_excel.replace(excel_path)
-    temp_excel_pop = Path("SUPER_MERGED_MASTER_FINAL_POPULATED.tmp.xlsx")
-    wb.save(temp_excel_pop)
-    temp_excel_pop.replace("SUPER_MERGED_MASTER_FINAL_POPULATED.xlsx")
+    temp_excel.replace(excel_path.with_name(excel_path.stem + "_REMAINING_REVIEWED.xlsx"))
 
     total_rows = len(all_rows)
     coverage = round((total_active / total_rows) * 100, 2)
@@ -210,11 +208,10 @@ async def verify_candidate(cand: str, row: dict, config: Config, fetcher: Tiered
         cls = dec.get("classification")
         check_b = dec.get("checks", {}).get("check_b_org_name")
 
-        if is_exact_slug and cls not in ("ELIMINATED_HARD", "ELIMINATED_SOFT", "CONTRADICTORY"):
-            return host
-
-        if check_b in ("YES", "PARTIAL") and cls in ("VALID", "VALID_EXACT", "VALID_ENTITY", "STRONG_MATCH"):
-            return host
+        # Require valid classification from verification engine
+        if cls in ("VALID", "VALID_GROUP"):
+            if check_b in ("YES", "PARTIAL") or is_exact_slug:
+                return host
     except Exception as e:
         LOG.debug("Verification error for %s: %s", host, e)
 

@@ -106,7 +106,15 @@ def entity_mention(text: str, organization: str) -> str:
 
 def relationship_mention(text: str, organization: str) -> str:
     context = entity_mention(text, organization)
-    return context if RELATION.search(context) else ""
+    if not context:
+        return ""
+    name = re.search(re.escape(organization), context, re.I)
+    if not name:
+        name = _flexible_entity_regex(organization).search(context) if _flexible_entity_regex(organization) else None
+    if not name:
+        return ""
+    return context if any(abs(match.start() - name.end()) <= 120 or abs(name.start() - match.end()) <= 120
+                          for match in RELATION.finditer(context)) else ""
 
 
 def official_domain_link(page: dict, target_domain: str) -> str:

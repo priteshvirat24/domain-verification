@@ -82,7 +82,7 @@ def extract_candidate_domain(organic_results: list[dict]) -> str | None:
                 host = host[4:]
             if not host:
                 continue
-            if any(exc in host for exc in EXCLUDE_DOMAINS):
+            if any(host == exc or host.endswith("." + exc) for exc in EXCLUDE_DOMAINS):
                 continue
             if url.lower().endswith(".pdf") or "/docs/" in url.lower():
                 continue
@@ -103,9 +103,29 @@ class SearchCache:
 
     def get(self, query: str) -> list[dict] | None:
         cur = self.conn.cursor()
-        row = cur.execute("SELECT results_json FROM searches WHERE query = ?", (query,)).fetchone()
+        row = cur.execute("SELECT results_json, created_at FROM searches WHERE query = ?", (query,)).fetchone()
         if row:
-            return json.loads(row[0])
+            results = json.loads(row[0])
+            created = row[1] if row[1] else None
+            # Gap 17: Expire empty results after 24h, non-empty after 30 days
+            if created:
+                try:
+                    from datetime import datetime, timezone, timedelta
+                    ts = datetime.fromisoformat(created.replace("Z", "+00:00"))
+                    age = datetime.now(timezone.utc) - ts
+                    if not results and age > timedelta(hours=24):
+                        # Empty results have expired — purge and retry
+                        self.conn.execute("DELETE FROM searches WHERE query = ?", (query,))
+                        self.conn.commit()
+                        return None
+                    if age > timedelta(days=30):
+                        # Stale results — purge and allow refresh
+                        self.conn.execute("DELETE FROM searches WHERE query = ?", (query,))
+                        self.conn.commit()
+                        return None
+                except Exception:
+                    pass
+            return results
         return None
 
     def put(self, query: str, results: list[dict]):
@@ -202,11 +222,10 @@ async def process_rows_batch(
             for q, org_res in batch_res.items():
                 search_cache.put(q, org_res)
                 search_results_by_query[q] = org_res
-            # For any queries that were in chunk but not returned by actor, cache empty to prevent retry loops
+            # Missing results may indicate a transient actor failure; retry them later.
             for q in chunk:
                 if q not in search_results_by_query:
-                    search_cache.put(q, [])
-                    search_results_by_query[q] = []
+                    LOG.warning("Search returned no response for query %r; left uncached", q)
 
     chunks = [needed_queries[i:i + batch_size] for i in range(0, len(needed_queries), batch_size)]
     if chunks:

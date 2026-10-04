@@ -152,11 +152,28 @@ async def main():
         host = host.lower()
         active_target = resolved_www_map.get(host)
         if active_target and active_target in confirmed_live_www:
-            r["Domain URL"] = f"https://{active_target}"
-            r["Domain Status"] = "REPLACED_INACTIVE"
-            stage1_recovered_rows += 1
+            # Gap 12: Verify ownership through elimination engine before accepting
+            norm = normalize_domain(active_target)
+            dom_host = norm.normalized_domain
+            dom_rec = await domain_cache.get(dom_host)
+            if dom_rec:
+                decision = evaluate_elimination_decision(
+                    {"Organization Name": r.get("Organization Name") or r.get("original_company_name"),
+                     "Country": r.get("country code") or r.get("Country (Group)")},
+                    norm,
+                    dom_rec,
+                    network_healthy=True,
+                )
+                if decision.get("classification") in ("VALID", "VALID_GROUP"):
+                    r["Domain URL"] = f"https://{active_target}"
+                    r["Domain Status"] = "REPLACED_INACTIVE"
+                    stage1_recovered_rows += 1
+                else:
+                    LOG.debug("www recovery skipped for %s: elimination said %s", active_target, decision.get("classification"))
+            else:
+                LOG.debug("www recovery skipped for %s: no domain record found after crawl", active_target)
 
-    LOG.info("Stage 1 Completed: %d rows updated to live www domains!", stage1_recovered_rows)
+    LOG.info("Stage 1 Completed: %d rows updated to verified www domains!", stage1_recovered_rows)
 
     # =========================================================================
     # STAGE 2: Deep Search for Remaining NOT_FOUND & Unresolved Rows
@@ -307,10 +324,9 @@ async def main():
         if st in ("VERIFIED_ACTIVE", "REPLACED_INACTIVE", "PRE_EXISTING_ACTIVE"):
             total_active_now += 1
 
-    wb.save(excel_path)
-    wb.save("SUPER_MERGED_MASTER_FINAL_POPULATED.xlsx")
+    wb.save(excel_path.with_name(excel_path.stem + "_RECOVERY_REVIEWED.xlsx"))
 
-    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+    with open(csv_path.with_name(csv_path.stem + "_RECOVERY_REVIEWED.csv"), "w", newline="", encoding="utf-8") as f:
         fieldnames = [c for c in all_rows[0].keys() if c != "_row_idx"]
         writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()

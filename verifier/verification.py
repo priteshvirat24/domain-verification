@@ -99,6 +99,8 @@ def _decision(row: dict, normalized: NormalizedDomain, domain: DomainRecord | No
 
 
 def verify_row(row: dict, normalized: NormalizedDomain, domain: DomainRecord | None,
-               evidence: list[Evidence], *, network_healthy: bool = True) -> dict:
-    from .elimination_engine import evaluate_elimination_decision
-    return evaluate_elimination_decision(row, normalized, domain, network_healthy=network_healthy)
+               evidence: list[Evidence], *, network_healthy: bool = True,
+               reviewer_decision: dict | None = None) -> dict:
+    from .proof_ladder import evaluate_proof_ladder
+    return evaluate_proof_ladder(row, normalized, domain, evidence, network_healthy=network_healthy,
+                                 reviewer_decision=reviewer_decision)

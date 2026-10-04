@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections import Counter
 from dataclasses import replace
 from urllib.parse import urlsplit
+from pathlib import Path
 
 from .cache import SQLiteCache
 from .config import Config
@@ -16,8 +18,10 @@ from .input import iter_input
 from .models import DomainRecord
 from .normalization import normalize_domain, registered_domain
 from .verification import verify_row
+from .proof_ladder import legal_identity_key
 
 LOG = logging.getLogger(__name__)
+EVIDENCE_VERSION = "strict-proof-v3"
 
 
 async def investigate_domain(domain: str, config: Config, fetcher: TieredFetcher) -> DomainRecord:
@@ -28,13 +32,34 @@ async def investigate_domain(domain: str, config: Config, fetcher: TieredFetcher
         record.blocked_reason = "DNS returned a private or non-global address"
         record.fetch_error_type = "UNSAFE_ADDRESS"
         return record
-    if record.dns_status == "FAILED":
-        record.http_status = 0
-        record.domain_active = False
-        record.fetch_error = "DNS resolution failed (host not found)"
-        record.fetch_error_type = "DNS"
-        return record
+    if record.dns_status in ("FAILED", "NXDOMAIN"):
+        # Fallback: try www.{domain} before giving up (Gap 6)
+        www_domain = "www." + domain if not domain.startswith("www.") else domain
+        www_dns = await dns_status(www_domain)
+        if www_dns in ("FAILED", "NXDOMAIN"):
+            record.http_status = 0
+            record.domain_active = False
+            record.fetch_error = "DNS resolution failed (host not found)"
+            record.fetch_error_type = "NXDOMAIN" if record.dns_status == "NXDOMAIN" and www_dns == "NXDOMAIN" else "DNS"
+            return record
+        # www resolves — use it instead
+        root = "https://" + www_domain + "/"
+        record.dns_status = www_dns
     home = await fetcher.fetch(root)
+    # Fallback: try www. variant if apex returned error (Gap 6)
+    if home.status in (0,) or (home.status >= 400 and not domain.startswith("www.")):
+        www_root = "https://www." + domain + "/"
+        www_home = await fetcher.fetch(www_root)
+        if www_home.status and (200 <= www_home.status < 400 or (www_home.status in (403, 429) and home.status == 0)):
+            home = www_home
+            root = www_root
+    # Fallback: try http:// if https:// failed completely (Gap 6)
+    if home.status == 0 or (home.error_type == "TLS"):
+        http_root = "http://" + domain + "/"
+        http_home = await fetcher.fetch(http_root)
+        if http_home.status and http_home.status > 0:
+            home = http_home
+            root = http_root
     if home.status in (403, 429) and config.use_stealth:
         home = await fetcher.fetch(root, allow_browser=True, use_stealth=True)
     page = extract_page(home.final_url or root, home.html, home.status)
@@ -78,12 +103,24 @@ async def process_records(records: list[tuple[int, dict, dict]], config: Config,
                           batch_domains: int = 50, fetch_domains: bool = True,
                           network_healthy: bool | None = None,
                           max_external_searches: int = 100,
+                          reviewer_decisions_file: str | None = None,
                           fetcher: TieredFetcher | None = None) -> tuple[list[dict], dict]:
     config.validate()
     fetcher = fetcher or TieredFetcher(config, proxy_url)
     healthy = (await network_health() if fetch_domains else True) if network_healthy is None else network_healthy
     normalized_by_row = [(row_id, original, canonical, normalize_domain(canonical.get("Domain Name")))
                          for row_id, original, canonical in records]
+    review_decisions: dict[tuple[str, str, str], dict] = {}
+    if reviewer_decisions_file:
+        with Path(reviewer_decisions_file).open(encoding="utf-8") as file:
+            for line in file:
+                if line.strip():
+                    item = json.loads(line)
+                    key = (legal_identity_key(str(item.get("organization") or "")),
+                           str(item.get("country") or "").upper(),
+                           normalize_domain(item.get("domain")).normalized_domain)
+                    if all(key):
+                        review_decisions[key] = item
     domains = list(dict.fromkeys(n.normalized_domain for _, _, _, n in normalized_by_row if n.normalized_domain))
     # One domain record can serve many row-level entity decisions.
     domain_records: dict[str, DomainRecord] = {}
@@ -138,10 +175,10 @@ async def process_records(records: list[tuple[int, dict, dict]], config: Config,
                     apify_records = await fetch_urls_with_apify(batch_urls, token=config.apify_token)
                     for rec in apify_records:
                         if rec.status == 200 and rec.html:
-                            host = urlsplit(rec.final_url or rec.requested_url).hostname or ""
+                            host = urlsplit(rec.requested_url).hostname or ""
                             if host.startswith("www."):
                                 host = host[4:]
-                            matched_domain = host if host in domain_records else next((bd for bd in batch if bd == host or host.endswith("." + bd) or bd.endswith("." + host)), None)
+                            matched_domain = host if host in batch else next((bd for bd in batch if host == "www." + bd), None)
                             if matched_domain and matched_domain in domain_records:
                                 old = domain_records[matched_domain]
                                 extracted = extract_page(rec.final_url or rec.requested_url, rec.html, 200)
@@ -154,7 +191,7 @@ async def process_records(records: list[tuple[int, dict, dict]], config: Config,
                                                   fetch_error=None,
                                                   fetch_error_type=None,
                                                   fetch_method="APIFY_CRAWLER",
-                                                  pages=[extracted])
+                                                  pages=old.pages + [extracted])
                                 domain_records[matched_domain] = new_rec
                                 await cache.put(new_rec)
                                 LOG.info("Apify successfully unblocked %s (title=%s)", matched_domain, extracted.get("title", "")[:40])
@@ -211,30 +248,33 @@ async def process_records(records: list[tuple[int, dict, dict]], config: Config,
                              redirect_chain=target.redirect_chain or domain.redirect_chain,
                              fetch_method=target.method,
                              fetch_attempts=domain.fetch_attempts + target.attempts)
-        key = (normalized.normalized_domain, str(canonical.get("Organization Name") or ""),
+        key = (EVIDENCE_VERSION, normalized.normalized_domain, str(canonical.get("Organization Name") or ""),
                normalized.requested_url if target else "",
                (domain.checked_at if domain else "") + (target.checked_at if target else ""),
                str(canonical.get("Country") or ""))
         if key not in evidence_cache:
             evidence = await cache.get_pair(key) if domain else None
             if evidence is None:
-                evidence = website_evidence(domain.pages, key[1], key[0],
+                evidence = website_evidence(domain.pages, key[2], key[1],
                                             str(canonical.get("Country") or "")) if domain else []
-                evidence += external_evidence_from_file(external_evidence_file, key[1], key[0])
+                evidence += external_evidence_from_file(external_evidence_file, key[2], key[1])
                 # Search is only for ambiguous pairs and only if explicitly enabled.
                 if search_ambiguous and domain and searches < max_external_searches and not any(e.relationship in ("exact_entity", "group_entity") and e.strength in ("STRONG", "VERY_STRONG") for e in evidence):
-                    evidence += await search_authoritative(key[1], key[0], fetcher)
+                    evidence += await search_authoritative(key[2], key[1], fetcher)
                     searches += 1
                 if domain:
                     await cache.put_pair(key, evidence)
             evidence_cache[key] = evidence
-        result = verify_row(canonical, normalized, domain, evidence_cache[key], network_healthy=healthy)
+        reviewer_key = (legal_identity_key(str(canonical.get("Organization Name") or "")),
+                        str(canonical.get("Country") or "").upper(), normalized.normalized_domain)
+        result = verify_row(canonical, normalized, domain, evidence_cache[key], network_healthy=healthy,
+                            reviewer_decision=review_decisions.get(reviewer_key))
         result = {**original, **{k: v for k, v in result.items() if k not in canonical},
-                  "input_row_id": row_id, "organization_for_verification": key[1]}
+                  "input_row_id": row_id, "organization_for_verification": key[2]}
         results.append(result)
         if dry_run:
             LOG.info("dry-run row=%s organization=%s domain=%s status=%s reason=%s",
-                     row_id, key[1], key[0],
+                     row_id, key[2], key[1],
                      result.get("classification") or result.get("verification_status"),
                      result.get("decision_reason") or result.get("verification_reason"))
     return results, {"unique_domains": len(domains), "network_healthy": healthy,
@@ -276,6 +316,8 @@ def representative_rows(path: str, count: int, organization_column: str | None =
     selected_records: list[tuple[int, dict, dict]] = []
 
     def add_rec(idx: int, rec: tuple[int, dict, dict]) -> bool:
+        if len(selected_records) >= count:
+            return False
         if idx not in selected_indices:
             selected_indices.add(idx)
             selected_records.append(rec)
@@ -283,14 +325,14 @@ def representative_rows(path: str, count: int, organization_column: str | None =
         return False
 
     # 1. Blank / missing domains (~2.5% of sample, up to 100 rows)
-    target_blanks = min(100, max(5, int(count * 0.025)))
+    target_blanks = min(100, max(1, int(count * 0.025)))
     blank_recs = [rec for (host, _), rec in quick_info if not host]
     rng.shuffle(blank_recs)
     for rec in blank_recs[:target_blanks]:
         add_rec(rec[0], rec)
 
     # 2. Path domains (~6% of sample, up to 250 rows)
-    target_paths = min(250, max(10, int(count * 0.06)))
+    target_paths = min(250, max(1, int(count * 0.06)))
     path_recs = [rec for (_, has_path), rec in quick_info if has_path]
     rng.shuffle(path_recs)
     for rec in path_recs[:target_paths]:
@@ -301,7 +343,7 @@ def representative_rows(path: str, count: int, organization_column: str | None =
     for dom in top_domains:
         dom_recs = [rec for (host, _), rec in quick_info if host == dom]
         rng.shuffle(dom_recs)
-        for rec in dom_recs[:10]:
+        for rec in dom_recs[:max(1, min(10, count // 200))]:
             add_rec(rec[0], rec)
 
     # 4. Stratified across all countries in dataset
@@ -312,7 +354,7 @@ def representative_rows(path: str, count: int, organization_column: str | None =
 
     for country, items in sorted(by_country.items()):
         rng.shuffle(items)
-        count_for_c = min(len(items), max(10, int(len(items) ** 0.5 * 3)))
+        count_for_c = min(len(items), max(1, min(10, count // max(1, len(by_country) * 8))))
         for rec in items[:count_for_c]:
             add_rec(rec[0], rec)
 
@@ -320,7 +362,7 @@ def representative_rows(path: str, count: int, organization_column: str | None =
     suspicious_patterns = re.compile(r"(blogspot|wordpress|wixsite|weebly|sites\.google|github\.io|facebook\.com|linkedin\.com|\d{5,}|[0-9-]{8,})", re.I)
     suspicious_recs = [rec for (host, _), rec in quick_info if host and suspicious_patterns.search(host)]
     rng.shuffle(suspicious_recs)
-    for rec in suspicious_recs[:100]:
+    for rec in suspicious_recs[:min(100, max(1, count // 50))]:
         add_rec(rec[0], rec)
 
     # 6. Fill remainder deterministically from entire population to reach exactly count

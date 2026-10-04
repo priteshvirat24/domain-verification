@@ -21,6 +21,7 @@ from urllib.parse import urlsplit
 import openpyxl
 
 from verifier.normalization import normalize_domain
+from verifier.proof_ladder import legal_identity_key
 from verifier.recover_inactive import clean_org_for_search, extract_candidate_domain, COUNTRY_MAP
 from verifier.elimination_engine import evaluate_elimination_decision
 from verifier.models import DomainRecord
@@ -32,8 +33,7 @@ LOG = logging.getLogger("super_merged_replacer")
 def build_indexes():
     LOG.info("1. Loading verified databases and search caches...")
     
-    # Inactive domain set
-    inactive_domains = set()
+    domain_status_map = {}
     results_path = Path("run_full_output/results.csv")
     verified_name_map = {}
     
@@ -41,53 +41,25 @@ def build_indexes():
         with open(results_path, "r", encoding="utf-8-sig") as f:
             reader = csv.DictReader(f)
             for r in reader:
-                d = (r.get("Domain Name") or r.get("final_url") or "").strip()
-                cl = r.get("classification")
+                d = (r.get("Domain Name") or r.get("original_domain") or r.get("final_url") or "").strip()
+                cl = r.get("verification_status") or ""
                 norm = normalize_domain(d).normalized_domain if d else ""
-                
-                if cl == "INACTIVE" and norm:
-                    inactive_domains.add(norm)
-                elif cl in ("VALID", "VALID_GROUP") and norm:
-                    country = (r.get("Country") or r.get("\ufeffCountry") or "").strip().upper()
-                    for nf in ("Organization Name", "organization_for_verification"):
-                        name = (r.get(nf) or "").strip()
-                        if name and country:
-                            c_upper = name.upper()
-                            c_clean = clean_org_for_search(name).upper()
-                            verified_name_map[(c_upper, country)] = norm
-                            verified_name_map[(c_clean, country)] = norm
+                country = (r.get("Country") or r.get("\ufeffCountry") or "").strip().upper()
+                name = (r.get("Organization Name") or r.get("organization_for_verification") or "").strip()
+                key = (legal_identity_key(name), country)
+                if norm and key[0]:
+                    domain_status_map[(key[0], country, norm)] = cl
+                if cl in ("VERIFIED_EXACT", "VERIFIED_GROUP") and norm and key[0]:
+                    verified_name_map.setdefault(key, set()).add(norm)
                             
-    LOG.info("Identified %d unique confirmed inactive domains", len(inactive_domains))
     LOG.info("Identified %d strictly verified (name, country) pairings", len(verified_name_map))
 
-    # Load search cache
-    conn = sqlite3.connect("verifier/search_cache.sqlite", timeout=60.0)
-    searches = dict(conn.execute("SELECT query, results_json FROM searches").fetchall())
-    LOG.info("Loaded %d cached Apify search queries", len(searches))
-    
-    # Pre-parse candidate domains from search cache
-    search_candidates = {}
-    for q, res_json in searches.items():
-        try:
-            cand = extract_candidate_domain(json.loads(res_json))
-            if cand:
-                search_candidates[q] = cand
-        except Exception:
-            pass
-    LOG.info("Pre-parsed %d candidate domains from search cache", len(search_candidates))
-
-    return inactive_domains, verified_name_map, search_candidates
+    return domain_status_map, verified_name_map
 
 
 def main():
     excel_path = Path("SUPER_MERGED_MASTER_FINAL.xlsx")
-    backup_path = Path("SUPER_MERGED_MASTER_FINAL_BACKUP.xlsx")
-    
-    if not backup_path.exists():
-        shutil.copyfile(excel_path, backup_path)
-        LOG.info("Created backup at %s", backup_path)
-
-    inactive_domains, verified_name_map, search_candidates = build_indexes()
+    domain_status_map, verified_name_map = build_indexes()
 
     LOG.info("2. Reading %s...", excel_path)
     wb = openpyxl.load_workbook(excel_path)
@@ -112,6 +84,8 @@ def main():
     retained_inactive_count = 0
     populated_empty_count = 0
     pre_existing_active_count = 0
+    mismatch_count = 0
+    needs_review_count = 0
     still_empty_count = 0
 
     LOG.info("3. Processing %d rows for replacement and population...", total_rows)
@@ -135,32 +109,20 @@ def main():
                 q = f'"{clean_name}" {country_name} official website'.strip()
                 queries.append((name_candidate, clean_name, q))
 
+        # Check existing verification status for current domain
+        identity_key = (legal_identity_key(org_name or orig_name), country_code)
+        curr_status = domain_status_map.get((identity_key[0], country_code, norm_curr), "")
+        verified_candidates = verified_name_map.get(identity_key, set())
+        verified_candidate = next(iter(verified_candidates)) if len(verified_candidates) == 1 else None
+
         # CASE A: Row has a domain, but it is INACTIVE -> REPLACE IT
-        if norm_curr and norm_curr in inactive_domains:
-            # Look for active replacement
+        if curr_status == "INACTIVE":
+            # Look for verified active replacement
             active_replacement = None
             
-            # Check verified name map
-            for name_cand, clean_cand, _ in queries:
-                if (name_cand.upper(), country_code) in verified_name_map:
-                    cand = verified_name_map[(name_cand.upper(), country_code)]
-                    if cand != norm_curr:
-                        active_replacement = cand
-                        break
-                elif (clean_cand.upper(), country_code) in verified_name_map:
-                    cand = verified_name_map[(clean_cand.upper(), country_code)]
-                    if cand != norm_curr:
-                        active_replacement = cand
-                        break
-            
-            # Check search cache candidates
-            if not active_replacement:
-                for _, _, q in queries:
-                    if q in search_candidates:
-                        cand = search_candidates[q]
-                        if cand != norm_curr:
-                            active_replacement = cand
-                            break
+            # Check strictly verified name map
+            if verified_candidate and verified_candidate != norm_curr:
+                active_replacement = verified_candidate
 
             if active_replacement:
                 ws.cell(row=row_idx, column=col_legacy_domain, value=curr_domain)
@@ -177,38 +139,37 @@ def main():
             found_domain = None
             
             # Check verified name map
-            for name_cand, clean_cand, _ in queries:
-                if (name_cand.upper(), country_code) in verified_name_map:
-                    found_domain = verified_name_map[(name_cand.upper(), country_code)]
-                    break
-                elif (clean_cand.upper(), country_code) in verified_name_map:
-                    found_domain = verified_name_map[(clean_cand.upper(), country_code)]
-                    break
-            
-            # Check search cache candidates
-            if not found_domain:
-                for _, _, q in queries:
-                    if q in search_candidates:
-                        found_domain = search_candidates[q]
-                        break
+            found_domain = verified_candidate
 
             if found_domain:
                 ws.cell(row=row_idx, column=col_domain, value=f"https://{found_domain}")
                 ws.cell(row=row_idx, column=col_domain_status, value="VERIFIED_ACTIVE")
                 populated_empty_count += 1
             else:
-                ws.cell(row=row_idx, column=col_domain_status, value="NOT_FOUND")
+                ws.cell(row=row_idx, column=col_domain_status, value="NO_DOMAIN_SUPPLIED")
                 still_empty_count += 1
 
-        # CASE C: Row has clean pre-existing active domain
-        else:
+        # CASE C: Row has domain evaluated as MISMATCH -> DO NOT CALL PRE_EXISTING_ACTIVE!
+        elif curr_status in ("MISMATCH", "REJECT"):
+            ws.cell(row=row_idx, column=col_domain_status, value="MISMATCH_REJECTED")
+            mismatch_count += 1
+
+        # CASE D: Row has domain evaluated as BLOCKED or NEEDS_REVIEW
+        elif curr_status in ("BLOCKED", "REVIEW", "NEEDS_REVIEW", "UNVERIFIED"):
+            ws.cell(row=row_idx, column=col_domain_status, value="NEEDS_REVIEW")
+            needs_review_count += 1
+
+        # CASE E: Row has verified valid domain
+        elif curr_status in ("VERIFIED_EXACT", "VERIFIED_GROUP"):
             ws.cell(row=row_idx, column=col_domain_status, value="PRE_EXISTING_ACTIVE")
             pre_existing_active_count += 1
 
-    LOG.info("4. Saving updated workbook to %s...", excel_path)
-    wb.save(excel_path)
-    
-    # Save standalone populated version as well
+        # CASE F: Domain not yet checked by pipeline
+        else:
+            ws.cell(row=row_idx, column=col_domain_status, value="NOT_CHECKED")
+            needs_review_count += 1
+
+    LOG.info("4. Saving updated workbook to a new output file...")
     out_populated = Path("SUPER_MERGED_MASTER_FINAL_POPULATED.xlsx")
     wb.save(out_populated)
 

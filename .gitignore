@@ -40,6 +40,9 @@ apify_test_output/
 dry_run_output/
 recovery_output/
 pilot_recovery_output/
+review_fix_pilot/
+strict_*/
+*pilot*/
 
 # CSV files (exclude large datasets, keep sample fixtures for unit tests)
 *.csv

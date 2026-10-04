@@ -40,9 +40,9 @@ async def _summary_from_dataset(dataset) -> dict:
         domain = row.get("normalized_domain", "")
         if domain:
             seen_domains.add(domain)
-            if row.get("http_status"):
+            if 200 <= int(row.get("http_status") or 0) < 400:
                 fetched_domains.add(domain)
-            elif row.get("fetch_attempts") or row.get("dns_status") in ("FAILED", "UNSAFE_ADDRESS"):
+            elif int(row.get("http_status") or 0) >= 400 or row.get("fetch_attempts") or row.get("dns_status") in ("FAILED", "NXDOMAIN", "UNSAFE_ADDRESS"):
                 failed_domains.add(domain)
             else:
                 not_attempted.add(domain)
@@ -84,15 +84,17 @@ async def main() -> None:
             raise ValueError("input_file is required")
         input_path, raw = await asyncio.to_thread(_input_path, input_file)
         run_id = hashlib.sha256(raw + json.dumps({
-            "pipeline_version": 2,
+            "pipeline_version": "strict-proof-v3",
             "organization_column": settings.get("organization_column"),
             "domain_column": settings.get("domain_column"),
             "dry_run": settings.get("dry_run", True),
             "sample_size": settings.get("sample_size", 75),
+            "max_evidence_pages": settings.get("max_evidence_pages", 7),
             "use_dynamic": settings.get("use_dynamic", False),
             "use_stealth": settings.get("use_stealth", False),
             "use_proxy": settings.get("use_proxy", False),
             "search_ambiguous": settings.get("search_ambiguous", False),
+            "reviewer_decisions_file": settings.get("reviewer_decisions_file"),
             "run_key": settings.get("run_key", ""),
         }, sort_keys=True).encode()).hexdigest()[:20]
         result_dataset = await Actor.open_dataset(name="domain-results-" + run_id)
@@ -143,6 +145,7 @@ async def main() -> None:
                                                   proxy_url=proxy_url, batch_domains=50,
                                                   network_healthy=healthy,
                                                   max_external_searches=external_searches_remaining,
+                                                  reviewer_decisions_file=settings.get("reviewer_decisions_file"),
                                                   fetcher=fetcher)
             output = json.loads(json.dumps(output, ensure_ascii=False, default=str))
             external_searches_remaining -= info["external_searches"]

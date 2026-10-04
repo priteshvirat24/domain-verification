@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 from .entity_resolution import entity_mention, relationship_mention
 from .models import Evidence
 from .normalization import normalize_name
+from .proof_ladder import legal_identity_key
 
 COUNTRY_ALIASES = {
     "JP": {"jp", "japan"}, "KR": {"kr", "korea", "south korea", "republic of korea"},
@@ -35,7 +36,7 @@ def website_evidence(pages: list[dict], organization: str, domain: str,
         for schema in page.get("jsonld", []):
             legal = schema.get("legalName")
             name = schema.get("name")
-            if isinstance(legal, str) and normalize_name(legal) == wanted:
+            if isinstance(legal, str) and legal_identity_key(legal) == legal_identity_key(organization):
                 records.append(Evidence(url, "organization_jsonld_legal_name", legal,
                                         "exact_entity", "VERY_STRONG", page.get("title", "")))
             elif isinstance(name, str) and normalize_name(name) == wanted:
@@ -52,8 +53,10 @@ def website_evidence(pages: list[dict], organization: str, domain: str,
             legal_text += " " + page.get("visible_text", "")
         mention = entity_mention(legal_text, organization)
         if mention:
-            records.append(Evidence(url, "official_legal_text", mention,
-                                    "exact_entity", "STRONG", page.get("title", "")))
+            owner_language = re.search(r"\b(?:operated by|owned by|registered (?:as|company)|data controller|privacy controller|legal entity|copyright|company number|registration number)\b", mention, re.I)
+            records.append(Evidence(url, "official_legal_text" if owner_language else "legal_page_mention", mention,
+                                    "exact_entity" if owner_language else "name_mention",
+                                    "STRONG" if owner_language else "WEAK", page.get("title", "")))
         rel = relationship_mention(page.get("visible_text", ""), organization)
         if rel:
             connects_to_site = any(normalize_name(name) and normalize_name(name) in normalize_name(rel)

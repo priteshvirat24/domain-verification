@@ -120,7 +120,9 @@ async def probe_all_inactive_with_waf_bypass(inactive_rows: list[dict], concurre
                         for proto in ["https", "http"]:
                             try:
                                 resp = await s.get(f"{proto}://{alive_target}", timeout=6, allow_redirects=True)
-                                if resp.status_code in (200, 301, 302, 307, 308, 403):
+                                # Gap 12: Only accept 2xx/3xx responses with non-parked content.
+                                # HTTP 403 means the site blocks us — we cannot verify ownership.
+                                if resp.status_code in (200, 301, 302, 307, 308):
                                     text = (resp.text or "")[:4000].lower()
                                     if not any(k in text for k in EXCLUDE_PARKED_KEYWORDS):
                                         verified[host] = f"{proto}://{alive_target}"
@@ -253,10 +255,9 @@ def save_master_files(all_rows: list[dict], excel_path: Path, csv_path: Path):
         if st in ("VERIFIED_ACTIVE", "REPLACED_INACTIVE", "PRE_EXISTING_ACTIVE"):
             total_active += 1
 
-    wb.save(excel_path)
-    wb.save("SUPER_MERGED_MASTER_FINAL_POPULATED.xlsx")
+    wb.save(excel_path.with_name(excel_path.stem + "_DEEP_REVIEWED.xlsx"))
 
-    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+    with open(csv_path.with_name(csv_path.stem + "_DEEP_REVIEWED.csv"), "w", newline="", encoding="utf-8") as f:
         fieldnames = [c for c in all_rows[0].keys() if c != "_row_idx"]
         writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
@@ -302,11 +303,30 @@ async def main():
         norm = normalize_domain(orig)
         host = norm.normalized_domain
         if host in waf_verified_map:
-            r["Domain URL"] = waf_verified_map[host]
-            r["Domain Status"] = "REPLACED_INACTIVE"
-            promoted_inactive += 1
+            # Gap 12: Verify ownership before accepting WAF-probed domain
+            dom_rec = await domain_cache.get(host)
+            if not dom_rec:
+                try:
+                    dom_rec = await investigate_domain(host, config, fetcher)
+                    await domain_cache.put(dom_rec)
+                except Exception:
+                    pass
+            if dom_rec:
+                decision = evaluate_elimination_decision(
+                    {"Organization Name": r.get("Organization Name") or r.get("original_company_name"),
+                     "Country": r.get("country code") or r.get("Country (Group)")},
+                    norm,
+                    dom_rec,
+                    network_healthy=True,
+                )
+                if decision.get("classification") in ("VALID", "VALID_GROUP"):
+                    r["Domain URL"] = waf_verified_map[host]
+                    r["Domain Status"] = "REPLACED_INACTIVE"
+                    promoted_inactive += 1
+                else:
+                    LOG.debug("WAF probe skipped for %s: elimination said %s", host, decision.get("classification"))
 
-    LOG.info("Phase 1 Result: Promoted %d inactive enterprise rows to REPLACED_INACTIVE!", promoted_inactive)
+    LOG.info("Phase 1 Result: Promoted %d verified inactive enterprise rows to REPLACED_INACTIVE!", promoted_inactive)
     if promoted_inactive > 0:
         LOG.info("Persisting %d newly recovered inactive domains immediately...", promoted_inactive)
         save_master_files(all_rows, excel_path, csv_path)

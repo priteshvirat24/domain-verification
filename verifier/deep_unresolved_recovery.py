@@ -170,7 +170,7 @@ async def harvest_high_speed_searches(queries: list[str], search_cache: SearchCa
                             if real_url and real_url.startswith("http") and "bing.com" not in real_url:
                                 parsed = urlsplit(real_url)
                                 host = (parsed.netloc or "").lower().split(":")[0]
-                                if not any(ex in host for ex in EXCLUDE_SEARCH_DOMAINS):
+                                if not any(host == ex or host.endswith("." + ex) for ex in EXCLUDE_SEARCH_DOMAINS):
                                     items.append({"title": title, "url": real_url})
                         if items:
                             search_cache.put(q, items)

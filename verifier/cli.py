@@ -5,6 +5,9 @@ import argparse
 import asyncio
 import json
 import logging
+import os
+import hashlib
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .cache import SQLiteCache
@@ -33,7 +36,8 @@ async def _run(args) -> None:
                                               search_ambiguous=args.search_ambiguous,
                                               proxy_url=args.proxy_url, fetch_domains=not args.offline,
                                               batch_domains=args.batch_domains,
-                                              max_external_searches=args.max_external_searches)
+                                              max_external_searches=args.max_external_searches,
+                                              reviewer_decisions_file=args.reviewer_decisions)
     finally:
         cache.close()
     output_dir = Path(args.output_dir)
@@ -44,6 +48,25 @@ async def _run(args) -> None:
     summary["network_healthy"] = info["network_healthy"]
     summary["dry_run"] = not args.full_run
     (output_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    def digest(path: Path) -> str:
+        h = hashlib.sha256()
+        with path.open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    package_dir = Path(__file__).resolve().parent
+    manifest = {
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "input_path": str(Path(args.input).resolve()),
+        "input_sha256": digest(Path(args.input)),
+        "code_sha256": {p.name: digest(p) for p in sorted(package_dir.glob("*.py"))},
+        "sample_seed": None if args.full_run else args.seed,
+        "selected_input_row_ids": [r[0] for r in records],
+        "config": {"concurrency": args.concurrency, "max_evidence_pages": args.max_evidence_pages,
+                   "dynamic": args.dynamic, "stealth": args.stealth, "apify_enabled": bool(args.use_apify and args.apify_token)},
+        "output_rows": len(output),
+    }
+    (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(json.dumps(summary, indent=2))
 
 
@@ -64,6 +87,7 @@ def main() -> None:
     parser.add_argument("--stealth", action="store_true")
     parser.add_argument("--proxy-url")
     parser.add_argument("--external-evidence", help="JSONL of fetched, reviewed authoritative sources")
+    parser.add_argument("--reviewer-decisions", help="JSONL of audited organization/country/domain decisions")
     parser.add_argument("--search-ambiguous", action="store_true", help="requires TAVILY_API_KEY or Apify token")
     parser.add_argument("--max-external-searches", type=int, default=100)
     parser.add_argument("--offline", action="store_true", help="inspect sample/output using cached evidence only")

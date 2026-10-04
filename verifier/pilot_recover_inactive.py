@@ -68,7 +68,7 @@ def extract_candidate_domain(organic_results: list[dict]) -> str | None:
             # Check exclusions
             parts = host.split(".")
             root_domain = ".".join(parts[-2:]) if len(parts) >= 2 else host
-            if any(exc in host for exc in EXCLUDE_DOMAINS):
+            if any(host == exc or host.endswith("." + exc) for exc in EXCLUDE_DOMAINS):
                 continue
             if url.lower().endswith(".pdf") or "/docs/" in url.lower():
                 continue

@@ -1,4 +1,5 @@
 import asyncio
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -47,6 +48,10 @@ class PipelineTests(unittest.TestCase):
                                     info['unique_domains'])
             self.assertEqual(summary['total_rows'], 2)
             self.assertEqual(summary['unique_domains'], 1)
+            evidence_lines = [json.loads(line) for line in (Path(directory) / 'evidence.jsonl').read_text().splitlines()]
+            self.assertTrue(any(item['input_row_id'] == 2 and item['evidence_url'] == 'https://acme.com/'
+                                and item['evidence_text'] for item in evidence_lines))
+            self.assertTrue((Path(directory) / 'audit_300.csv').exists())
             cache.close()
 
 

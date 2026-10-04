@@ -6,11 +6,19 @@ import re
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlsplit
 
-KEYWORDS = ("about", "company", "corporate", "contact", "legal", "privacy", "terms", "imprint", "subsidiar")
-PARKED = re.compile(r"domain (?:is )?(?:for sale|expired|parked)|buy this domain|sedo parking|afternic", re.I)
+from .normalization import registered_domain
+
+KEYWORDS = ("about", "company", "corporate", "contact", "legal", "privacy", "terms", "imprint", "subsidiar", "investor", "profile")
+PARKED = re.compile(
+    r"\b(?:domain\s+(?:is\s+)?(?:for\s+sale|expired|parked)|buy\s+this\s+domain|"
+    r"sedo\s+parking|godaddy\s+parking|afternic|hugedomains|dan\.com|uniregistry|"
+    r"this\s+domain\s+has\s+expired|domain\s+expired|renew\s+this\s+domain)\b",
+    re.I
+)
 EMAIL = re.compile(r"[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}")
-PHONE = re.compile(r"(?:\+\d{1,3}[\s.-]?)?(?:\(?\d{2,4}\)?[\s.-]?)?\d{3,4}[\s.-]?\d{3,4}")
-REGISTRATION = re.compile(r"(?:registration|company|business|vat|uen|abn|acn)\s*(?:no\.?|number|id|#)\s*[:.]?\s*[A-Z0-9-]{5,25}", re.I)
+PHONE_INTERNATIONAL = re.compile(r"\+\d{1,3}[\s.-]?(?:\(?\d{1,4}\)?[\s.-]?)?\d{3,4}[\s.-]?\d{3,4}\b")
+PHONE_LABELED = re.compile(r"(?:tel|phone|fax|hotline|call|mob(?:ile)?)\s*[:.]?\s*(\+?[0-9\s().-]{7,20})", re.I)
+REGISTRATION = re.compile(r"(?:registration|company|business|vat|uen|abn|acn|tax\s*id)\s*(?:no\.?|number|id|#)\s*[:.]?\s*[A-Z0-9-]{5,25}", re.I)
 
 
 class _Parser(HTMLParser):
@@ -28,11 +36,15 @@ class _Parser(HTMLParser):
         self._jsonld_current: list[str] = []
         self._tags: list[str] = []
         self._skip = 0
+        self._footer_depth = 0
         self._jsonld = False
         self._anchor: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attr = dict(attrs)
+        is_footer_elem = tag == "footer" or any("footer" in str(v).lower() or "copyright" in str(v).lower() for k, v in attrs if k in ("class", "id"))
+        if is_footer_elem:
+            self._footer_depth += 1
         if tag not in ("area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"):
             self._tags.append(tag)
         if tag in ("style", "noscript"):
@@ -50,6 +62,8 @@ class _Parser(HTMLParser):
             self.links.append((attr.get("href") or "", ""))
 
     def handle_endtag(self, tag: str) -> None:
+        if tag == "footer":
+            self._footer_depth = max(0, self._footer_depth - 1)
         if tag == "a" and self.links:
             href, _ = self.links[-1]
             self.links[-1] = (href, " ".join(self._anchor)[:120])
@@ -82,7 +96,7 @@ class _Parser(HTMLParser):
             self.h1.append(clean)
         if "h2" in self._tags:
             self.h2.append(clean)
-        if "footer" in self._tags:
+        if "footer" in self._tags or self._footer_depth > 0 or "©" in clean or "copyright" in clean.lower():
             self.footer.append(clean)
         if "a" in self._tags:
             self._anchor.append(clean)
@@ -116,13 +130,32 @@ def extract_page(url: str, html: str, status: int) -> dict:
     text = " ".join(parser.text)[:50_000]
     links = []
     host = (urlsplit(url).hostname or "").lower()
+    reg_host = registered_domain(host) if host else ""
     for href, anchor in parser.links[:1000]:
         full = urljoin(url, href).split("#", 1)[0]
         if urlsplit(full).scheme not in ("http", "https"):
             continue
+        link_host = (urlsplit(full).hostname or "").lower()
+        is_internal = link_host == host
+        is_sister = bool(reg_host and registered_domain(link_host) == reg_host)
         links.append({"url": full, "anchor": anchor,
-                      "internal": (urlsplit(full).hostname or "").lower() == host})
-    emails = sorted(set(EMAIL.findall(text)))[:30]
+                      "internal": is_internal, "sister": is_sister})
+
+    extracted_emails = set(EMAIL.findall(text))
+    for href, _ in parser.links:
+        if href.lower().startswith("mailto:"):
+            mail_target = href[7:].split("?")[0].strip()
+            extracted_emails.update(EMAIL.findall(mail_target))
+    emails = sorted(extracted_emails)[:30]
+
+    found_phones = set(PHONE_INTERNATIONAL.findall(text))
+    for m in PHONE_LABELED.finditer(text):
+        num = m.group(1).strip()
+        digits = re.sub(r"\D", "", num)
+        if 7 <= len(digits) <= 15:
+            found_phones.add(num)
+    phones = sorted(found_phones)[:20]
+
     social_hosts = ("linkedin.com", "facebook.com", "instagram.com", "x.com", "twitter.com", "youtube.com")
     social_links = [link["url"] for link in links if any((urlsplit(link["url"]).hostname or "").endswith(h) for h in social_hosts)]
     addresses = [schema["address"] for schema in _schemas(parser.jsonld_raw) if schema.get("address")]
@@ -132,7 +165,7 @@ def extract_page(url: str, html: str, status: int) -> dict:
         "visible_text": text, "footer": " ".join(parser.footer)[:8000],
         "canonical_url": urljoin(url, parser.canonical) if parser.canonical else "",
         "jsonld": _schemas(parser.jsonld_raw), "emails": emails,
-        "phones": sorted(set(PHONE.findall(text)))[:20],
+        "phones": phones,
         "addresses": addresses[:20], "social_links": list(dict.fromkeys(social_links))[:30],
         "registrations": REGISTRATION.findall(text)[:15],
         "links": links[:500], "parked": bool(PARKED.search(" ".join(parser.title) + " " + text[:800])),
@@ -143,7 +176,7 @@ def extract_page(url: str, html: str, status: int) -> dict:
 def relevant_links(page: dict, max_pages: int) -> list[str]:
     scored: list[tuple[int, str]] = []
     for link in page.get("links", []):
-        if not link["internal"]:
+        if not (link.get("internal") or link.get("sister")):
             continue
         path = urlsplit(link["url"]).path.lower()
         label = link["anchor"].lower()

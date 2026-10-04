@@ -23,6 +23,7 @@ import html
 import json
 import logging
 import os
+import random
 import re
 import shutil
 import sqlite3
@@ -209,10 +210,11 @@ async def harvest_searches_parallel(queries: list[str], search_cache: SearchCach
                         elif r.status_code == 429:
                             await asyncio.sleep(2.0 + attempt * 2)
                 except Exception as e:
-                    LOG.debug("Search attempt %d error for '%s': %s", attempt + 1, q, e)
+                    LOG.warning("Search attempt %d error for '%s': %s", attempt + 1, q, e)
                     await asyncio.sleep(1.0)
             
             if not success:
+                LOG.warning("All search attempts failed for query: '%s'", q)
                 results_map[q] = []
 
             completed += 1
@@ -296,16 +298,7 @@ async def main():
     direct_recovered_map = await probe_inactive_domains(inactive_rows)
 
     direct_recovered_count = 0
-    for r in inactive_rows:
-        orig = r.get("Original Legacy Domain") or r.get("Domain URL") or ""
-        norm = normalize_domain(orig)
-        host = norm.normalized_domain
-        if host in direct_recovered_map:
-            r["Domain URL"] = direct_recovered_map[host]
-            r["Domain Status"] = "REPLACED_INACTIVE"
-            direct_recovered_count += 1
-
-    LOG.info("Phase 1 Result: Directly promoted %d inactive rows to REPLACED_INACTIVE!", direct_recovered_count)
+    LOG.info("Phase 1 found %d reachable domains; reachability alone will not change any row", len(direct_recovered_map))
 
     # Re-evaluate remaining unresolved rows
     still_unresolved = [r for r in unresolved_rows if r.get("Domain Status") in ("UNVERIFIED_INACTIVE", "NOT_FOUND")]
@@ -386,18 +379,13 @@ async def main():
         if not dom_rec:
             continue
 
-        decision = evaluate_elimination_decision(
-            {"Organization Name": rows_list[0].get("Organization Name") or rows_list[0].get("original_company_name"),
-             "Country": rows_list[0].get("country code")},
-            norm,
-            dom_rec,
-            network_healthy=True,
-        )
-
-        decision_class = decision.get("classification")
-        if decision_class in ("VALID", "VALID_GROUP"):
-            domain_url = f"https://{host}"
-            for r in rows_list:
+        domain_url = f"https://{host}"
+        for r in rows_list:
+            decision = evaluate_elimination_decision(
+                {"Organization Name": r.get("Organization Name") or r.get("original_company_name"),
+                 "Country": r.get("country code") or r.get("Country (Group)")},
+                norm, dom_rec, network_healthy=True)
+            if decision.get("classification") in ("VALID", "VALID_GROUP"):
                 prior_st = r.get("Domain Status")
                 r["Domain URL"] = domain_url
                 if prior_st == "UNVERIFIED_INACTIVE":
@@ -437,10 +425,9 @@ async def main():
         if st in ("VERIFIED_ACTIVE", "REPLACED_INACTIVE", "PRE_EXISTING_ACTIVE"):
             total_active += 1
 
-    wb.save(excel_path)
-    wb.save("SUPER_MERGED_MASTER_FINAL_POPULATED.xlsx")
+    wb.save(excel_path.with_name(excel_path.stem + "_MAX_PARALLEL_REVIEWED.xlsx"))
 
-    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+    with open(csv_path.with_name(csv_path.stem + "_MAX_PARALLEL_REVIEWED.csv"), "w", newline="", encoding="utf-8") as f:
         fieldnames = [c for c in all_rows[0].keys() if c != "_row_idx"]
         writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()

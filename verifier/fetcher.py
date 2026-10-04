@@ -14,7 +14,7 @@ from .config import Config
 from .models import FetchRecord
 
 LOG = logging.getLogger(__name__)
-USER_AGENT = "DomainRelationshipVerifier/1.0"
+USER_AGENT = "DomainVerificationAuditor/2.0 (+https://github.com/priteshvirat24/domain-verification)"
 
 
 def utc_now() -> str:
@@ -39,7 +39,9 @@ async def dns_status(host: str) -> str:
             if any(not ip_address(a[4][0]).is_global for a in addresses):
                 return "UNSAFE_ADDRESS"
             return "RESOLVED"
-        except socket.gaierror:
+        except socket.gaierror as exc:
+            if exc.errno == socket.EAI_NONAME:
+                return "NXDOMAIN"
             if attempt == 0:
                 await asyncio.sleep(0.2)
         except Exception:
@@ -76,9 +78,7 @@ class TieredFetcher:
                 async with self._semaphore:
                     kwargs = dict(timeout=self.config.timeout_seconds, retries=0,
                                   follow_redirects="safe", max_redirects=self.config.max_redirects,
-                                  headers={"User-Agent": USER_AGENT},
-                                  impersonate="chrome",
-                                  verify=False)
+                                  headers={"User-Agent": USER_AGENT}, verify=True)
                     response = await AsyncFetcher.get(url, **kwargs)
                 result.status = int(response.status)
                 result.final_url = str(response.url)
@@ -109,9 +109,7 @@ class TieredFetcher:
                 from scrapling.fetchers import AsyncFetcher
                 kwargs = dict(timeout=min(4, self.config.timeout_seconds), retries=0,
                               follow_redirects="safe", max_redirects=3,
-                              headers={"User-Agent": USER_AGENT},
-                              impersonate="chrome",
-                              verify=False)
+                              headers={"User-Agent": USER_AGENT}, verify=True)
                 async with self._semaphore:
                     resp = await AsyncFetcher.get(robots_url, **kwargs)
                 if int(resp.status) == 200:

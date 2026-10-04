@@ -22,6 +22,9 @@ Local outputs:
 - `results.csv`: every selected input row once, source columns preserved, appended decision and provenance fields.
 - `evidence.jsonl`: one structured record per evidence item.
 - `review.csv`: prioritized `MISMATCH`, `PROBABLE`, `UNVERIFIED`, `BLOCKED`, and `REDIRECT` rows.
+- `inactive_recovery.csv`: blank, parked, expired, or explicitly nonexistent domains for separate discovery work.
+- `audit_300.csv`: a stratified set for human labeling; its labels and accuracy are intentionally blank.
+- `manifest.json`: input and code hashes, sample seed, selected row IDs, and execution settings.
 - `summary.json`: counts and rates; ground-truth accuracy stays null without labels.
 
 The SQLite cache keeps domain pages, input path pages, and entity-level evidence separately for 30 days. Duplicate domains reuse the crawl, while each organization/domain pair receives its own decision. Browser fetches are opt-in and only used after HTTP indicates a JS shell or access protection. The crawler fetches the homepage and up to seven high-priority identity/legal pages; it does not crawl an entire site. Requests use a global concurrency bound, per-host pacing, robots checks, safe redirects, timeout, and finite retry/backoff.
@@ -30,14 +33,16 @@ The SQLite cache keeps domain pages, input path pages, and entity-level evidence
 
 - `VERIFIED_EXACT`: official legal/footer or Organization JSON-LD identifies the entity.
 - `VERIFIED_GROUP`: an official group site identifies itself and explicitly relates the entity to the group. An identical brand token alone cannot establish the relationship.
-- `PROBABLE`: corroborating site signals exist but legal/group proof is absent.
+- `PROBABLE`: corroborating site signals exist but legal/group proof is absent; it remains in the review queue.
 - `UNVERIFIED`: accessible site or missing input without adequate relationship evidence.
 - `MISMATCH`: strong, fetched/curated authoritative evidence explicitly supports an unrelated owner. A different homepage name alone is insufficient.
-- `INACTIVE`: parking, expiry, HTTP 410, or DNS failure only when independent network health is confirmed.
-- `REDIRECT`: cross-registered-domain redirect; `destination_verification_status` records the destination assessment.
+- `INACTIVE`: no domain, parking, expiry, HTTP 410, or explicit NXDOMAIN with independent network health. `inactive_subtype` distinguishes these cases.
+- `REDIRECT`: cross-registered-domain redirect that remains unverified; `destination_verification_status` records the destination assessment. A verified destination retains its verified status and `is_redirected=true`.
 - `BLOCKED`: robots, protection, persistent access errors, or an environment unable to reach the site.
 
 External search is discovery only. A search snippet is never evidence: the returned source URL is fetched and the relevant text retained. A previously reviewed external-evidence JSONL can be passed with `--external-evidence`; each entry needs `organization`, `domain`, `source_url`, `source_type`, `source_title`, `evidence_text`, `relationship`, `strength`, and `fetched_at`.
+
+Persist manual decisions with `--reviewer-decisions decisions.jsonl`. Each JSONL record needs the exact `organization`, `country`, and `domain`, plus `decision`, `reason`, `answer_type`, `evidence_url`, `evidence_text`, `reviewer`, `reviewed_at`, and `fetched_at`. A decision without its traceable source is ignored. The file is matched by full legal name, country, and normalized domain so a group review cannot silently transfer to a different entity.
 
 ## Apify Actor
 
@@ -65,4 +70,4 @@ If `use_proxy` is enabled, configure Apify Proxy in the Actor account; the proxy
 
 Run `python -m unittest discover -s verifier/tests -v`. Tests cover exact identity, subsidiary/group evidence, weak mentions, mismatch restraint, redirects, parking, blocked versus inactive DNS, duplicate-domain reuse, row preservation, and export counts.
 
-The local host could not resolve external domains or install missing Scrapling/Apify dependencies from PyPI. Therefore the saved 75-row `dry_run_output` is an **offline schema/sample check**, with all rows unverified and zero fetched domains. It is not a live classification validation. A network-enabled Actor/local environment must run the live dry run and inspect evidence before the full dataset is processed. No full run was started here.
+The original `dry_run_output` predates the strict proof rules and should not be used as a current validation. The October 2026 live pilot and 4,000-row run use fresh domain caches. No full 93,918-row run has been started. Apify and external search require credentials; without them, blocked sites and subsidiaries needing outside proof remain in the review set. Accuracy cannot be claimed until the 300-row audit is hand labeled.
