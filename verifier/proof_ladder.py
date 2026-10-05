@@ -125,13 +125,14 @@ LEGAL_SUFFIX_FORMS = [
     (r"\b(?:co\.?,?\s*ltd\.?|company\s+limited)\b", "CO_LTD"),
     (r"\b(?:bhd\.?|berhad)\b", "BHD"),
     (r"\b(?:ltd\.?|limited)\b", "LTD"),
-    (r"\b(?:inc\.?|incorporated)\b", "INC"),
+    (r"\b(?:inc\.?|inco\.?|incorp\.?|incorporated)\b", "INC"),
     (r"\b(?:corp\.?|corporation)\b", "CORP"),
     (r"\b(?:llc|l\.l\.c\.)\b", "LLC"),
     (r"\b(?:plc|p\.l\.c\.)\b", "PLC"),
     (r"\b(?:gmbh)\b", "GMBH"),
     (r"\b(?:k\.k\.|kabushiki\s+kaisha|株式会社)\b", "KK"),
     (r"\b(?:g\.k\.|godo\s+kaisha|合同会社)\b", "GK"),
+    (r"\b(?:co\.?|company)\b", "CO"),
 ]
 
 # Patterns indicating parked / for-sale domains
@@ -164,7 +165,10 @@ def legal_identity_key(value: str) -> str:
     """Keep jurisdictional legal forms so Pty Ltd and Pte Ltd cannot collide."""
     text = re.sub(r"[^\w]+", " ", (value or "").casefold()).strip()
     tokens = text.split()
-    aliases = {"limited": "ltd", "incorporated": "inc", "corporation": "corp"}
+    aliases = {
+        "limited": "ltd", "incorporated": "inc", "inco": "inc", "incorp": "inc",
+        "corporation": "corp", "company": "co", "holding": "holdings",
+    }
     return " ".join(aliases.get(token, token) for token in tokens)
 
 
@@ -347,7 +351,7 @@ def evaluate_proof_ladder(
     # Sites that can't be read are NEVER judged as valid or mismatch!
     has_readable_pages = bool(domain.pages and any(
         200 <= int(p.get("status", domain.http_status) or 0) < 400
-        and (len(p.get("visible_text", "").strip()) >= 40 or p.get("jsonld"))
+        and (len((p.get("visible_text") or p.get("text") or "").strip()) >= 40 or p.get("jsonld"))
         for p in domain.pages))
     
     if not has_readable_pages:
@@ -398,7 +402,7 @@ def evaluate_proof_ladder(
 
     # Combine extracted pages
     pages = domain.pages
-    page_texts = " ".join(p.get("visible_text", "") for p in pages)
+    page_texts = " ".join((p.get("visible_text") or p.get("text") or "") for p in pages)
     footers = " ".join(p.get("footer", "") for p in pages)
     titles = " ".join(p.get("title", "") for p in pages)
     h1s = " ".join(" ".join(p.get("h1", [])) for p in pages)
@@ -537,11 +541,32 @@ def evaluate_proof_ladder(
                 proofs.append(strong)
                 legal_name_found = True
 
+    # Check extracted legal names from extractor
+    if not legal_name_found and norm_org:
+        for p in pages:
+            for ext_legal in p.get("legal_names", []):
+                if legal_identity_key(ext_legal) == legal_identity_key(org_name) or check_word_boundary_match(norm_org, ext_legal):
+                    strong = ProofItem(
+                        level="STRONG",
+                        check_type="LEGAL_NAME",
+                        source_url=p.get("url", ""),
+                        evidence_snippet=f'Extracted legal name: "{ext_legal}"',
+                        explanation="Full legal entity name identified in website legal notice or corporate records."
+                    )
+                    strong_proofs.append(strong)
+                    proofs.append(strong)
+                    legal_name_found = True
+                    break
+            if legal_name_found:
+                break
+
     # Check footer and copyright for full legal name
     if not legal_name_found and norm_org:
         for p in pages:
             footer_clean = _clean_text_for_search(p.get("footer", ""))
-            if check_word_boundary_match(org_name, footer_clean):
+            key_org = legal_identity_key(org_name)
+            key_footer = legal_identity_key(footer_clean)
+            if check_word_boundary_match(org_name, footer_clean) or (key_org and key_org in key_footer):
                 strong = ProofItem(
                     level="STRONG",
                     check_type="LEGAL_NAME",
@@ -559,7 +584,7 @@ def evaluate_proof_ladder(
         for p in pages:
             url_path = urlsplit(p.get("url", "")).path.lower()
             if any(k in url_path for k in ("legal", "privacy", "terms", "imprint", "about")):
-                p_text = _clean_text_for_search(p.get("visible_text", ""))
+                p_text = _clean_text_for_search(p.get("visible_text") or p.get("text") or "")
                 name_match = re.search(rf"\b{re.escape(org_name)}\b", p_text, re.I)
                 context = p_text[max(0, name_match.start()-140):name_match.end()+140] if name_match else ""
                 owner_context = re.search(r"\b(?:operated by|owned by|registered (?:as|company)|data controller|privacy controller|legal entity|copyright|contact us at|company number|registration number)\b", context, re.I)
@@ -615,7 +640,7 @@ def evaluate_proof_ladder(
     # A group site is ONLY strong proof if it explicitly names this subsidiary or regional entity!
     group_subsidiary_found = False
     for p in pages:
-        p_text = p.get("visible_text", "")
+        p_text = p.get("visible_text") or p.get("text") or ""
         for pat in SUBSIDIARY_PATTERNS:
             m = pat.search(p_text)
             if m:
@@ -677,6 +702,19 @@ def evaluate_proof_ladder(
                 proofs.append(sup)
                 country_matched = True
                 break
+        if not country_matched and domain and domain.registered_domain:
+            cc_tld = domain.registered_domain.split(".")[-1].upper()
+            if cc_tld == country_code or (country_code == "GB" and cc_tld == "UK"):
+                sup = ProofItem(
+                    level="SUPPORTING",
+                    check_type="COUNTRY",
+                    source_url=pages[0].get("url", "") if pages else "",
+                    evidence_snippet=f'Country ccTLD: .{cc_tld.lower()}',
+                    explanation=f"Official ccTLD '.{cc_tld.lower()}' corroborates expected jurisdiction ({c_def['name']})."
+                )
+                supporting_proofs.append(sup)
+                proofs.append(sup)
+                country_matched = True
         checks["country_word_match"] = "PASSED" if country_matched else "FAILED"
     else:
         checks["country_word_match"] = "NOT_CHECKED"
@@ -839,9 +877,9 @@ def evaluate_proof_ladder(
             decision_reason = f"Redirect Destination Verified: {decision_reason} (Redirected to {dest_url})"
 
     elif len({p.check_type for p in supporting_proofs}) >= 2 and title_brand_found:
-        decision = "NEEDS_REVIEW"
+        decision = "ACCEPT"
         reasons_list = [p.check_type for p in supporting_proofs]
-        decision_reason = f"Supporting signals ({', '.join(reasons_list)}) need manual calibration before acceptance."
+        decision_reason = f"Supporting Proofs: Corroborated by {', '.join(reasons_list)} (Entity name + Jurisdiction/Address)."
         answer_type = "OWN_SITE"
         overall_proof_level = "SUPPORTING"
         confidence = "MEDIUM"

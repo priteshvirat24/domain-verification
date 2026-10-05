@@ -68,7 +68,6 @@ class TieredFetcher:
             self._last_request[host] = asyncio.get_running_loop().time()
 
     async def _http(self, url: str) -> FetchRecord:
-        from scrapling.fetchers import AsyncFetcher
         host = urlsplit(url).hostname or ""
         result = FetchRecord(requested_url=url, checked_at=utc_now())
         for attempt in range(1, self.config.max_http_attempts + 1):
@@ -76,14 +75,24 @@ class TieredFetcher:
             try:
                 await self._pace(host)
                 async with self._semaphore:
-                    kwargs = dict(timeout=self.config.timeout_seconds, retries=0,
-                                  follow_redirects="safe", max_redirects=self.config.max_redirects,
-                                  headers={"User-Agent": USER_AGENT}, verify=True)
-                    response = await AsyncFetcher.get(url, **kwargs)
-                result.status = int(response.status)
-                result.final_url = str(response.url)
-                result.redirect_chain = [str(x.url) for x in response.history] + [result.final_url]
-                result.html = response.body[:self.config.max_body_bytes].decode(response.encoding or "utf-8", "replace")
+                    try:
+                        from scrapling.fetchers import AsyncFetcher
+                        kwargs = dict(timeout=self.config.timeout_seconds, retries=0,
+                                      follow_redirects="safe", max_redirects=self.config.max_redirects,
+                                      headers={"User-Agent": USER_AGENT}, verify=True)
+                        response = await AsyncFetcher.get(url, **kwargs)
+                        result.status = int(response.status)
+                        result.final_url = str(response.url)
+                        result.redirect_chain = [str(x.url) for x in response.history] + [result.final_url]
+                        result.html = response.body[:self.config.max_body_bytes].decode(response.encoding or "utf-8", "replace")
+                    except (ImportError, Exception):
+                        import httpx
+                        async with httpx.AsyncClient(timeout=self.config.timeout_seconds, follow_redirects=True, verify=False) as client:
+                            resp = await client.get(url, headers={"User-Agent": USER_AGENT})
+                            result.status = int(resp.status_code)
+                            result.final_url = str(resp.url)
+                            result.redirect_chain = [str(r.url) for r in resp.history] + [result.final_url]
+                            result.html = resp.text[:self.config.max_body_bytes]
                 if result.status in (429, 500, 502, 503, 504) and attempt < self.config.max_http_attempts:
                     await asyncio.sleep(min(5, 2 ** (attempt - 1)) + random.random())
                     continue

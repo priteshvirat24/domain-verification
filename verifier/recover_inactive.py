@@ -70,9 +70,12 @@ def clean_org_for_search(name: str) -> str:
     return cleaned or name
 
 
-def extract_candidate_domain(organic_results: list[dict]) -> str | None:
+def extract_candidate_domains(organic_results: list[dict], max_candidates: int = 5) -> list[str]:
+    """Extract top distinct candidate domains from search results (Framework Gap 13 & 16)."""
+    candidates = []
+    seen = set()
     for res in organic_results:
-        url = res.get("url") or ""
+        url = res.get("url") or res.get("href") or ""
         if not url:
             continue
         try:
@@ -80,16 +83,24 @@ def extract_candidate_domain(organic_results: list[dict]) -> str | None:
             host = (parsed.hostname or "").lower()
             if host.startswith("www."):
                 host = host[4:]
-            if not host:
+            if not host or host in seen:
                 continue
             if any(host == exc or host.endswith("." + exc) for exc in EXCLUDE_DOMAINS):
                 continue
             if url.lower().endswith(".pdf") or "/docs/" in url.lower():
                 continue
-            return host
+            seen.add(host)
+            candidates.append(host)
+            if len(candidates) >= max_candidates:
+                break
         except Exception:
             continue
-    return None
+    return candidates
+
+
+def extract_candidate_domain(organic_results: list[dict]) -> str | None:
+    cands = extract_candidate_domains(organic_results, max_candidates=1)
+    return cands[0] if cands else None
 
 
 class SearchCache:

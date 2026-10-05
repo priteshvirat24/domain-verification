@@ -1,0 +1,22 @@
+{
+  "total_rows": 113488,
+  "total_unresolved_evaluated": 21613,
+  "newly_resolved_inactive": 40,
+  "newly_resolved_empty": 14,
+  "total_newly_resolved": 54,
+  "total_active_domains_now": 91929,
+  "coverage_percent": 81.0,
+  "status_distribution": {
+    "VERIFIED_ACTIVE": 16664,
+    "PRE_EXISTING_ACTIVE": 60564,
+    "REPLACED_INACTIVE": 14701,
+    "NOT_FOUND": 16744,
+    "UNVERIFIED_INACTIVE": 4815
+  },
+  "unresolvable_reasons_breakdown": {
+    "REJECTED_PROOF_LADDER_MISMATCH": 11112,
+    "DOMAIN_PERMANENTLY_DEAD_NO_SUCCESSOR": 3786,
+    "NO_OFFICIAL_CANDIDATE": 1826,
+    "NO_SEARCH_INDEX_RECORD": 4835
+  }
+}
